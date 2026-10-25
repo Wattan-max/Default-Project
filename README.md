@@ -43,7 +43,7 @@ Get a key at [dashboard.sarvam.ai](https://dashboard.sarvam.ai).
      ┌──────────────┼─────────────────┐
      ▼              ▼                 ▼
 task cards      POST /translate   POST /text-to-speech
-(importance,    (mayura:v1,       (bulbul:v2,
+(importance,    (mayura:v1,       (bulbul:v3,
  dates, done)    transcript)       briefing + reminders)
 ```
 

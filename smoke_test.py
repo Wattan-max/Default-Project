@@ -51,7 +51,7 @@ def main() -> int:
         )
         print(f"     ok: {translated['translated_text'][:120]}")
 
-        print("3/4  text-to-speech (bulbul:v2)…")
+        print("3/4  text-to-speech (bulbul:v3)…")
         audio = server.speak("नमस्ते, आपका प्लान तैयार है।", "hi-IN", key)
         if not audio.startswith(b"RIFF"):
             raise RuntimeError("TTS returned bytes that are not a WAV file.")

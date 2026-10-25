@@ -182,8 +182,12 @@ def chat(messages: list[dict], key: str) -> str:
         "model": os.environ.get("SARVAM_CHAT_MODEL", "sarvam-105b"),
         "messages": messages,
         "temperature": 0.2,
-        "max_tokens": 2400,
-        "reasoning_effort": "low",
+        "max_tokens": 2200,
+        # Thinking mode is on by default on sarvam-105b and its tokens count
+        # against max_tokens, so a long prompt can come back with empty content
+        # and finish_reason "length". Extraction needs a few hundred tokens,
+        # not a chain of thought, so reasoning is switched off explicitly.
+        "reasoning_effort": None,
         "response_format": {"type": "json_object"},
     }
 
@@ -199,6 +203,19 @@ def chat(messages: list[dict], key: str) -> str:
             extra_headers={"Authorization": f"Bearer {key}"},
         )
 
+    def content_of(data: dict) -> str:
+        try:
+            message = data["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise SarvamError("Sarvam returned an unexpected chat response.", 502) from exc
+        return (message.get("content") or message.get("reasoning_content") or "").strip()
+
+    def hit_the_ceiling(data: dict) -> bool:
+        try:
+            return data["choices"][0].get("finish_reason") == "length"
+        except (KeyError, IndexError, TypeError):
+            return False
+
     try:
         data = send(payload)
     except SarvamError as exc:
@@ -210,13 +227,19 @@ def chat(messages: list[dict], key: str) -> str:
         payload.pop("reasoning_effort", None)
         data = send(payload)
 
-    try:
-        message = data["choices"][0]["message"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise SarvamError("Sarvam returned an unexpected chat response.", 502) from exc
-    content = message.get("content") or message.get("reasoning_content") or ""
-    if not content.strip():
-        raise SarvamError("Sarvam returned an empty response. Please retry.", 502)
+    content = content_of(data)
+    if not content and hit_the_ceiling(data):
+        # Reasoning was ignored and ate the budget: retry with room for both.
+        data = send({**payload, "max_tokens": 3600})
+        content = content_of(data)
+
+    if not content:
+        raise SarvamError(
+            "Sarvam returned an empty response. Please retry.",
+            502,
+            "If this keeps happening, the model may be spending its token "
+            "budget on reasoning. Try a shorter note.",
+        )
     return content
 
 
@@ -260,7 +283,16 @@ def translate(text: str, source: str, target: str, key: str) -> dict:
     return {"translated_text": " ".join(piece for piece in pieces if piece).strip()}
 
 
-def speak(text: str, language: str, key: str, speaker: str = "anushka") -> bytes:
+TTS_SPEAKERS = {
+    "shubh", "aditya", "ritu", "priya", "neha", "rahul", "pooja", "rohan",
+    "simran", "kavya", "amit", "dev", "ishita", "shreya", "ratan", "varun",
+    "manan", "sumit", "kabir", "aayan", "ashutosh", "advait", "anand",
+    "tarun", "sunny", "mani",
+}
+TTS_DEFAULT_SPEAKER = "priya"
+
+
+def speak(text: str, language: str, key: str, speaker: str = TTS_DEFAULT_SPEAKER) -> bytes:
     if language not in TTS_LANGUAGES:
         label = pipeline.language_name(language) if language in pipeline.LANGUAGES else language
         raise ApiError(
@@ -268,13 +300,13 @@ def speak(text: str, language: str, key: str, speaker: str = "anushka") -> bytes
             422,
             "The reminder text is still ready to copy.",
         )
-    if speaker not in {"anushka", "abhilash", "manisha", "vidya", "arya", "karun", "hitesh"}:
-        speaker = "anushka"
+    if speaker not in TTS_SPEAKERS:
+        speaker = TTS_DEFAULT_SPEAKER
     payload = {
-        "text": text.strip()[:1400],
+        "text": text.strip()[:2400],
         "language_code": language,
         "speaker": speaker,
-        "model": "bulbul:v2",
+        "model": "bulbul:v3",
         "pace": 1.0,
         "output_audio_codec": "wav",
     }
@@ -451,7 +483,7 @@ class Handler(BaseHTTPRequestHandler):
                 text = str(data.get("text") or "").strip()
                 if not text:
                     raise ApiError("Nothing to speak.", 400)
-                audio = speak(text, str(data.get("language") or "hi-IN"), key, str(data.get("speaker") or "anushka"))
+                audio = speak(text, str(data.get("language") or "hi-IN"), key, str(data.get("speaker") or TTS_DEFAULT_SPEAKER))
                 self._send_bytes(200, audio, "audio/wav", {"Cache-Control": "no-store"})
             else:
                 self._json(404, {"error": "Not found."})
