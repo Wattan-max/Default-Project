@@ -441,7 +441,7 @@ class Handler(BaseHTTPRequestHandler):
     # -- routes
     def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
-        if path == "/api/health":
+        if path in ("/api/health", "/health"):
             self._json(200, {
                 "ok": True,
                 "key_configured": bool(env_key()),
